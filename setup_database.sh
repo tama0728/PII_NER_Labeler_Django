@@ -7,6 +7,44 @@ set -e  # 오류 발생시 스크립트 중단
 
 echo "🚀 KDPII Labeler 데이터베이스 설정을 시작합니다..."
 
+# PostgreSQL 설치 여부 확인
+if ! command -v psql &> /dev/null; then
+    echo "📦 PostgreSQL이 설치되어 있지 않습니다. 설치를 진행합니다..."
+    
+    # OS 확인 후 적절한 패키지 매니저로 설치
+    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        if command -v apt-get &> /dev/null; then
+            # Ubuntu/Debian
+            sudo apt-get update
+            sudo apt-get install -y postgresql postgresql-contrib python3-psycopg2
+        elif command -v yum &> /dev/null; then
+            # CentOS/RHEL
+            sudo yum install -y postgresql-server postgresql-contrib python3-psycopg2
+            sudo postgresql-setup initdb
+        elif command -v dnf &> /dev/null; then
+            # Fedora
+            sudo dnf install -y postgresql-server postgresql-contrib python3-psycopg2
+            sudo postgresql-setup --initdb
+        else
+            echo "❌ 지원되지 않는 Linux 배포판입니다. PostgreSQL을 수동으로 설치해주세요."
+            exit 1
+        fi
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        # macOS
+        if command -v brew &> /dev/null; then
+            brew install postgresql
+        else
+            echo "❌ Homebrew가 필요합니다. brew install postgresql 을 실행해주세요."
+            exit 1
+        fi
+    else
+        echo "❌ 지원되지 않는 운영체제입니다. PostgreSQL을 수동으로 설치해주세요."
+        exit 1
+    fi
+    
+    echo "✅ PostgreSQL 설치가 완료되었습니다."
+fi
+
 # PostgreSQL 서비스 상태 확인
 if ! systemctl is-active --quiet postgresql; then
     echo "📦 PostgreSQL 서비스를 시작합니다..."
