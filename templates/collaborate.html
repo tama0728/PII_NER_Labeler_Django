@@ -1,5 +1,7 @@
 {% extends 'base.html' %}
 {% load static %}
+{% csrf_token %}
+<meta name="csrf-token" content="{{ csrf_token }}"
 
 {% block title %}협업 - KDPII NER Labeler{% endblock %}
 
@@ -218,7 +220,7 @@ document.addEventListener('DOMContentLoaded', loadWorkspaces);
 
 async function loadWorkspaces() {
     try {
-        const response = await fetch('/api/workspaces/');
+        const response = await fetch('/api/v1/workspaces/');
         const data = await response.json();
         
         // Handle Django REST Framework pagination format
@@ -277,7 +279,7 @@ async function deleteWorkspace(workspaceId) {
     }
     
     try {
-        const response = await fetch(`/api/workspaces/${workspaceId}/`, {
+        const response = await fetch(`/api/v1/workspaces/${workspaceId}/`, {
             method: 'DELETE'
         });
         
@@ -300,14 +302,23 @@ document.getElementById('createWorkspaceForm').addEventListener('submit', async 
     const memberName = document.getElementById('memberName').value;
     const description = document.getElementById('workspaceDesc').value;
     
+    // Get CSRF token from DOM
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value || 
+                      document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+    
     try {
-        const response = await fetch('/api/projects/', {
+        const headers = {'Content-Type': 'application/json'};
+        if (csrfToken) {
+            headers['X-CSRFToken'] = csrfToken;
+        }
+        
+        const response = await fetch('/api/v1/workspaces/', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: headers,
             body: JSON.stringify({
                 name: name, 
                 description: description, 
-                owner_id: memberName
+                owner_id: 1  // Use numeric ID instead of string
             })
         });
         
@@ -316,6 +327,9 @@ document.getElementById('createWorkspaceForm').addEventListener('submit', async 
             hideCreateModal();
             loadWorkspaces();
             
+            // Store member name in session
+            sessionStorage.setItem('memberName', memberName);
+            
             // Auto-enter the newly created workspace
             if (result.id) {
                 setTimeout(() => {
@@ -323,7 +337,9 @@ document.getElementById('createWorkspaceForm').addEventListener('submit', async 
                 }, 500);
             }
         } else {
-            alert('워크스페이스 생성에 실패했습니다.');
+            const errorData = await response.json().catch(() => ({}));
+            console.error('워크스페이스 생성 오류:', errorData);
+            alert(`워크스페이스 생성에 실패했습니다: ${errorData.detail || '알 수 없는 오류'}`);
         }
     } catch (error) {
         console.error('Failed to create workspace:', error);

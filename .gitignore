@@ -127,6 +127,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+.env.docker
 
 # Spyder project settings
 .spyderproject
@@ -240,6 +241,7 @@ pids/
 
 # Claude Code specific
 .claude/
+.serena/
 
 # Backup files
 *.bak

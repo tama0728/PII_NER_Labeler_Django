@@ -63,19 +63,32 @@
 
 ## 🚀 빠른 시작
 
-### 1. 자동 배포 (권장)
+### 1. Docker로 실행 (권장)
 
 ```bash
 # 저장소 클론
 git clone <repository-url>
 cd kdpii_labeler_django
 
+# 환경 변수 파일 설정
+cp .env.docker .env
+
+# Docker Compose로 실행
+docker-compose up --build
+
+# 브라우저에서 접속
+# http://localhost:8080
+```
+
+### 2. 자동 배포 스크립트
+
+```bash
 # 자동 배포 스크립트 실행
 chmod +x deploy.sh
 ./deploy.sh
 ```
 
-### 2. 수동 설치
+### 3. 수동 설치
 
 #### 필수 요구사항
 - Python 3.8+
@@ -105,9 +118,24 @@ pip install -r requirements.txt
 
 4. **환경 변수 설정**
 ```bash
+# 개발 환경용
 cp .env.example .env
+
+# Docker 환경용  
+cp .env.docker .env
+
 # .env 파일을 편집하여 데이터베이스 설정 등을 수정
 ```
+
+**주요 환경 변수:**
+- `SECRET_KEY`: Django 시크릿 키 (프로덕션에서 반드시 변경)
+- `DEBUG`: 디버그 모드 (개발: True, 프로덕션: False)  
+- `DB_NAME`, `DB_USER`, `DB_PASSWORD`: 데이터베이스 연결 정보
+- `ALLOWED_HOSTS`: 허용된 호스트명
+- `DEFAULT_PORT`: 서버 포트 (기본값: 8080)
+- `DJANGO_SUPERUSER_USERNAME`: 관리자 계정명 (기본값: admin)
+- `DJANGO_SUPERUSER_EMAIL`: 관리자 이메일
+- `DJANGO_SUPERUSER_PASSWORD`: 관리자 비밀번호
 
 5. **데이터베이스 설정**
 ```bash
@@ -178,8 +206,11 @@ kdpii_labeler_django/
 ## 🖥️ 사용법
 
 ### 1. 관리자 페이지 접속
-- URL: `http://localhost:8000/admin/`
-- Django 슈퍼유저 계정으로 로그인
+- **URL**: `http://localhost:8080/admin/`
+- **Docker 환경**: `.env` 파일에 설정된 관리자 계정으로 자동 로그인
+  - 기본 계정: `admin` / `admin123!@#`
+  - `.env.docker` 파일에서 변경 가능
+- **수동 설치**: `python manage.py createsuperuser`로 계정 생성 필요
 
 ### 2. 프로젝트 생성
 1. 관리자 페이지에서 "Projects" → "Add Project"
@@ -239,9 +270,41 @@ python manage.py collectstatic --clear
 
 ## 🌐 배포
 
-### 개발 환경
+### Docker 환경 (권장)
+
+#### 개발 환경
 ```bash
-python manage.py runserver 0.0.0.0:8000
+# 환경 설정
+cp .env.docker .env
+
+# 컨테이너 빌드 및 실행
+docker-compose up --build
+
+# 백그라운드 실행
+docker-compose up -d
+
+# 로그 확인
+docker-compose logs -f web
+
+# 컨테이너 중지
+docker-compose down
+```
+
+#### Docker 환경 변수
+```bash
+# .env 파일에서 설정 가능한 주요 변수들
+DEBUG=True                    # 디버그 모드
+DEFAULT_PORT=8080            # 서버 포트
+DB_NAME=kdpii_labeler_db     # 데이터베이스명
+DB_USER=kdpii_user           # DB 사용자명
+DB_PASSWORD=your-password    # DB 비밀번호
+SECRET_KEY=your-secret-key   # Django 시크릿 키
+```
+
+### 로컬 개발 환경
+```bash
+# 가상환경에서 실행
+python manage.py runserver 0.0.0.0:8080
 ```
 
 ### 프로덕션 환경
@@ -252,21 +315,9 @@ python manage.py runserver 0.0.0.0:8000
 pip install uwsgi
 
 # uWSGI 실행
-uwsgi --http :8000 --module kdpii_labeler_django.wsgi
+uwsgi --http :8080 --module kdpii_labeler_django.wsgi
 
 # Nginx 리버스 프록시 설정 (deploy.sh 참조)
-```
-
-#### Docker (선택사항)
-```dockerfile
-# Dockerfile 예시
-FROM python:3.9
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-COPY . .
-EXPOSE 8000
-CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
 ```
 
 ## 🔒 보안 고려사항
