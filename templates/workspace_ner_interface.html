@@ -1,0 +1,627 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}NER 주석 작업공간 - KDPII NER Labeler{% endblock %}
+
+{% block extra_css %}
+<style>
+    .annotation-container {
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        margin-bottom: 20px;
+    }
+    
+    .text-display {
+        padding: 30px;
+        font-size: 16px;
+        line-height: 1.8;
+        border-bottom: 1px solid #e9ecef;
+        min-height: 200px;
+        background: #fafbfc;
+        user-select: text;
+        cursor: text;
+        -webkit-user-select: text;
+        -moz-user-select: text;
+        -ms-user-select: text;
+    }
+    
+    .text-display p {
+        margin: 0;
+        user-select: text;
+        -webkit-user-select: text;
+        -moz-user-select: text;
+        -ms-user-select: text;
+    }
+    
+    .label-controls {
+        padding: 20px;
+        background: white;
+    }
+    
+    .label-button {
+        margin: 5px;
+        padding: 8px 16px;
+        border: 2px solid transparent;
+        border-radius: 20px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        display: inline-block;
+    }
+    
+    .label-button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+    
+    .label-button.selected {
+        border-color: currentColor;
+        box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.25);
+    }
+    
+    .annotation-stats {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 20px;
+        border-radius: 12px;
+        margin-bottom: 20px;
+    }
+    
+    .task-navigation {
+        background: white;
+        padding: 15px;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        margin-bottom: 20px;
+        text-align: center;
+    }
+    
+    .highlight {
+        padding: 2px 4px;
+        margin: 0 1px;
+        border-radius: 3px;
+        cursor: pointer;
+        position: relative;
+    }
+    
+    .highlight:hover::after {
+        content: attr(title);
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #333;
+        color: white;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        white-space: nowrap;
+        z-index: 1000;
+    }
+    
+    .selected-text {
+        background: rgba(0, 123, 255, 0.2);
+        border: 2px solid rgba(0, 123, 255, 0.5);
+        border-radius: 3px;
+        padding: 1px 2px;
+    }
+    
+    .export-section {
+        background: white;
+        padding: 20px;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        margin-top: 20px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid my-4">
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h1 class="h3 mb-1">
+                        <i class="fas fa-edit text-primary me-2"></i>NER 주석 작업공간
+                    </h1>
+                    <p class="text-muted mb-0">현재 작업: <span id="current-task-name">로딩 중...</span></p>
+                </div>
+                <div class="text-end">
+                    <button class="btn btn-outline-primary me-2" onclick="saveAnnotations()">
+                        <i class="fas fa-save me-1"></i>저장
+                    </button>
+                    <a href="{% url 'ner_labeler:dashboard' %}" class="btn btn-secondary">
+                        <i class="fas fa-arrow-left me-1"></i>대시보드
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Stats Row -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="annotation-stats text-center">
+                <h4 id="progress-count">0/0</h4>
+                <p class="mb-0">완료된 작업</p>
+            </div>
+        </div>
+        <div class="col-md-9">
+            <div class="task-navigation">
+                <button class="btn btn-outline-primary me-2" onclick="previousTask()" id="prev-btn">
+                    <i class="fas fa-chevron-left"></i> 이전
+                </button>
+                <span class="mx-3">
+                    <strong id="task-counter">1 / 1</strong>
+                </span>
+                <button class="btn btn-outline-primary ms-2" onclick="nextTask()" id="next-btn">
+                    다음 <i class="fas fa-chevron-right"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Main Annotation Area -->
+    <div class="row">
+        <div class="col-lg-8">
+            <div class="annotation-container">
+                <div class="text-display" id="text-display">
+                    <p class="text-muted text-center">작업을 로드하는 중입니다...</p>
+                </div>
+                <div class="label-controls">
+                    <h6 class="mb-3">라벨 선택 (선택한 텍스트에 적용됩니다)</h6>
+                    <div id="label-buttons">
+                        <!-- Label buttons will be loaded here -->
+                    </div>
+                    <div class="mt-3">
+                        <button class="btn btn-sm btn-warning me-2" onclick="clearSelection()">
+                            <i class="fas fa-eraser me-1"></i>선택 해제
+                        </button>
+                        <button class="btn btn-sm btn-danger" onclick="removeAnnotation()">
+                            <i class="fas fa-trash me-1"></i>주석 제거
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-lg-4">
+            <!-- Current Annotations -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h6 class="mb-0"><i class="fas fa-list me-2"></i>현재 주석 목록</h6>
+                </div>
+                <div class="card-body">
+                    <div id="annotations-list">
+                        <p class="text-muted">아직 주석이 없습니다.</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Instructions -->
+            <div class="card">
+                <div class="card-header">
+                    <h6 class="mb-0"><i class="fas fa-info-circle me-2"></i>사용법</h6>
+                </div>
+                <div class="card-body">
+                    <ol class="mb-0 ps-3">
+                        <li>텍스트에서 개체명을 드래그하여 선택하세요</li>
+                        <li>적절한 라벨 버튼을 클릭하세요</li>
+                        <li>주석이 자동으로 적용됩니다</li>
+                        <li>저장 버튼을 눌러 작업을 저장하세요</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Export Section -->
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="export-section">
+                <h6 class="mb-3"><i class="fas fa-download me-2"></i>내보내기</h6>
+                <div class="btn-group">
+                    <button class="btn btn-outline-success" onclick="exportJSON()">
+                        <i class="fas fa-file-code me-1"></i>JSON 형식
+                    </button>
+                    <button class="btn btn-outline-info" onclick="exportCoNLL()">
+                        <i class="fas fa-file-alt me-1"></i>CoNLL 형식
+                    </button>
+                    <button class="btn btn-outline-primary" onclick="exportLabelStudio()">
+                        <i class="fas fa-file-export me-1"></i>Label Studio 형식
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Global variables
+let currentTask = null;
+let currentTaskIndex = 0;
+let tasks = [];
+let labels = [];
+let annotations = [];
+let selectedText = null;
+let selectedLabel = null;
+let currentWorkspaceId = null;
+
+// Get workspace ID from URL parameters
+function getWorkspaceId() {
+    const urlParams = new URLSearchParams(window.location.search);
+    return urlParams.get('workspace');
+}
+
+// Initialize the interface
+document.addEventListener('DOMContentLoaded', function() {
+    currentWorkspaceId = getWorkspaceId();
+    if (!currentWorkspaceId) {
+        document.getElementById('text-display').innerHTML = '<p class="text-danger text-center">워크스페이스 ID가 필요합니다.</p>';
+        return;
+    }
+    loadWorkspaceInfo();
+    loadLabels();
+    loadTasks();
+});
+
+// Load workspace information
+async function loadWorkspaceInfo() {
+    try {
+        const response = await fetch(`/api/workspaces/${currentWorkspaceId}/`);
+        const workspace = await response.json();
+        
+        // Update workspace name in the header
+        const taskNameElement = document.getElementById('current-task-name');
+        if (taskNameElement) {
+            taskNameElement.textContent = `워크스페이스: ${workspace.name}`;
+        }
+        
+        // Update page title
+        document.title = `${workspace.name} - NER 주석 작업공간`;
+        
+    } catch (error) {
+        console.error('Error loading workspace info:', error);
+        const taskNameElement = document.getElementById('current-task-name');
+        if (taskNameElement) {
+            taskNameElement.textContent = `워크스페이스 ${currentWorkspaceId}`;
+        }
+    }
+}
+
+// Load available labels
+async function loadLabels() {
+    try {
+        // Load labels for current workspace (includes global labels)
+        const response = await fetch(`/api/labels/?project=${currentWorkspaceId}`);
+        const data = await response.json();
+        labels = data.results || data;
+        renderLabelButtons();
+    } catch (error) {
+        console.error('Error loading labels:', error);
+    }
+}
+
+// Load tasks
+async function loadTasks() {
+    try {
+        // Load tasks filtered by current workspace (project)
+        const response = await fetch(`/api/tasks/?project=${currentWorkspaceId}`);
+        const data = await response.json();
+        tasks = data.results || data;
+        
+        if (tasks.length > 0) {
+            loadTask(0);
+        } else {
+            document.getElementById('text-display').innerHTML = '<p class="text-muted text-center">이 워크스페이스에 작업이 없습니다.</p>';
+        }
+    } catch (error) {
+        console.error('Error loading tasks:', error);
+        document.getElementById('text-display').innerHTML = '<p class="text-danger text-center">작업을 로드할 수 없습니다.</p>';
+    }
+}
+
+// Render label buttons
+function renderLabelButtons() {
+    const container = document.getElementById('label-buttons');
+    container.innerHTML = labels.map(label => {
+        const color = label.background || '#007bff'; // Use 'background' field from API
+        return `<button class="label-button" 
+                 style="background-color: ${color}; color: ${getContrastColor(color)}" 
+                 onclick="selectLabel('${label.id}')" 
+                 data-label-id="${label.id}">
+            ${label.value}
+         </button>`;
+    }).join('');
+}
+
+// Load specific task
+async function loadTask(index) {
+    if (index < 0 || index >= tasks.length) return;
+    
+    currentTaskIndex = index;
+    currentTask = tasks[index];
+    
+    // Update UI - Keep workspace info and add current task
+    const taskNameElement = document.getElementById('current-task-name');
+    const currentWorkspaceName = taskNameElement.textContent.split(' - ')[0]; // Keep workspace name
+    taskNameElement.textContent = `${currentWorkspaceName} - 작업 ${index + 1}`;
+    document.getElementById('task-counter').textContent = `${index + 1} / ${tasks.length}`;
+    document.getElementById('progress-count').textContent = `${index} / ${tasks.length}`;
+    
+    // Load task text and annotations
+    displayTaskText(currentTask.data || currentTask.text || '텍스트가 없습니다.');
+    
+    // Load existing annotations for this task
+    try {
+        const response = await fetch(`/api/tasks/${currentTask.id}/annotations/`);
+        const data = await response.json();
+        annotations = data.results || data;
+        renderAnnotations();
+    } catch (error) {
+        console.error('Error loading annotations:', error);
+        annotations = [];
+    }
+    
+    // Update navigation buttons
+    document.getElementById('prev-btn').disabled = index === 0;
+    document.getElementById('next-btn').disabled = index === tasks.length - 1;
+}
+
+// Display task text
+function displayTaskText(text) {
+    const display = document.getElementById('text-display');
+    display.innerHTML = `<p>${text}</p>`;
+    
+    // Add text selection functionality
+    display.addEventListener('mouseup', handleTextSelection);
+}
+
+// Handle text selection
+function handleTextSelection() {
+    const selection = window.getSelection();
+    if (selection.rangeCount > 0 && selection.toString().trim()) {
+        const range = selection.getRangeAt(0);
+        const textDisplay = document.getElementById('text-display');
+        const fullText = textDisplay.textContent;
+        
+        // Calculate accurate offsets relative to the full text
+        const selectedText_temp = selection.toString().trim();
+        const startOffset = fullText.indexOf(selectedText_temp);
+        const endOffset = startOffset + selectedText_temp.length;
+        
+        selectedText = {
+            text: selectedText_temp,
+            start: startOffset,
+            end: endOffset
+        };
+        
+        console.log('Selected text:', selectedText);
+        
+        // Highlight selected text visually
+        document.querySelectorAll('.selected-text').forEach(el => 
+            el.classList.remove('selected-text'));
+        
+        if (range.toString().trim()) {
+            const span = document.createElement('span');
+            span.className = 'selected-text';
+            try {
+                range.surroundContents(span);
+            } catch (e) {
+                // For complex selections, just highlight with background color
+                const commonAncestor = range.commonAncestorContainer;
+                if (commonAncestor.nodeType === Node.TEXT_NODE) {
+                    commonAncestor.parentElement.classList.add('selected-text');
+                }
+            }
+        }
+    }
+}
+
+// Select a label
+function selectLabel(labelId) {
+    // Remove previous selection
+    document.querySelectorAll('.label-button.selected').forEach(btn => 
+        btn.classList.remove('selected'));
+    
+    // Select new label
+    document.querySelector(`[data-label-id="${labelId}"]`).classList.add('selected');
+    selectedLabel = labels.find(l => l.id == labelId);
+    
+    // Apply annotation if text is selected
+    if (selectedText && selectedLabel) {
+        createAnnotation();
+    }
+}
+
+// Create annotation
+function createAnnotation() {
+    if (!selectedText || !selectedLabel) return;
+    
+    const annotation = {
+        id: Date.now().toString(),
+        task_id: currentTask.id,
+        label_id: selectedLabel.id,
+        text: selectedText.text,
+        start_offset: selectedText.start,
+        end_offset: selectedText.end,
+        label_name: selectedLabel.value,
+        label_color: selectedLabel.background
+    };
+    
+    annotations.push(annotation);
+    renderAnnotations();
+    applyHighlighting();
+    clearSelection();
+}
+
+// Render annotations list
+function renderAnnotations() {
+    const container = document.getElementById('annotations-list');
+    
+    if (annotations.length === 0) {
+        container.innerHTML = '<p class="text-muted">아직 주석이 없습니다.</p>';
+        return;
+    }
+    
+    container.innerHTML = annotations.map((ann, index) => 
+        `<div class="mb-2 p-2 border rounded" style="border-color: ${ann.label_color}">
+            <strong style="color: ${ann.label_color}">${ann.label_name}</strong><br>
+            <small class="text-muted">"${ann.text}"</small>
+            <button class="btn btn-sm btn-outline-danger float-end" onclick="removeAnnotationById('${ann.id}')">
+                <i class="fas fa-times"></i>
+            </button>
+         </div>`
+    ).join('');
+}
+
+// Apply highlighting to annotated text
+function applyHighlighting() {
+    // This would need more complex implementation for proper text highlighting
+    console.log('Highlighting annotations:', annotations);
+}
+
+// Navigation functions
+function previousTask() {
+    if (currentTaskIndex > 0) {
+        loadTask(currentTaskIndex - 1);
+    }
+}
+
+function nextTask() {
+    if (currentTaskIndex < tasks.length - 1) {
+        loadTask(currentTaskIndex + 1);
+    }
+}
+
+// Utility functions
+function clearSelection() {
+    selectedText = null;
+    document.querySelectorAll('.selected-text').forEach(el => {
+        const parent = el.parentNode;
+        parent.insertBefore(document.createTextNode(el.textContent), el);
+        parent.removeChild(el);
+    });
+    
+    document.querySelectorAll('.label-button.selected').forEach(btn => 
+        btn.classList.remove('selected'));
+}
+
+function removeAnnotation() {
+    if (selectedText) {
+        // Remove annotation for selected text
+        annotations = annotations.filter(ann => ann.text !== selectedText.text);
+        renderAnnotations();
+        clearSelection();
+    }
+}
+
+function removeAnnotationById(annotationId) {
+    annotations = annotations.filter(ann => ann.id !== annotationId);
+    renderAnnotations();
+    applyHighlighting();
+}
+
+function getContrastColor(hexcolor) {
+    // Handle undefined or invalid colors
+    if (!hexcolor || typeof hexcolor !== 'string') {
+        return 'black';
+    }
+    
+    // Ensure color starts with #
+    if (!hexcolor.startsWith('#')) {
+        hexcolor = '#' + hexcolor;
+    }
+    
+    // Handle short hex colors (#fff -> #ffffff)
+    if (hexcolor.length === 4) {
+        hexcolor = '#' + hexcolor[1] + hexcolor[1] + hexcolor[2] + hexcolor[2] + hexcolor[3] + hexcolor[3];
+    }
+    
+    // Ensure we have a valid 7-character hex color
+    if (hexcolor.length !== 7) {
+        return 'black';
+    }
+    
+    const r = parseInt(hexcolor.substr(1,2),16);
+    const g = parseInt(hexcolor.substr(3,2),16);
+    const b = parseInt(hexcolor.substr(5,2),16);
+    
+    // Check for NaN values
+    if (isNaN(r) || isNaN(g) || isNaN(b)) {
+        return 'black';
+    }
+    
+    const yiq = ((r*299)+(g*587)+(b*114))/1000;
+    return (yiq >= 128) ? 'black' : 'white';
+}
+
+// Save annotations
+async function saveAnnotations() {
+    try {
+        for (const annotation of annotations) {
+            await fetch('/api/annotations/', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(annotation)
+            });
+        }
+        alert('주석이 저장되었습니다!');
+    } catch (error) {
+        console.error('Error saving annotations:', error);
+        alert('주석 저장 중 오류가 발생했습니다.');
+    }
+}
+
+// Export functions
+function exportJSON() {
+    const data = {
+        task: currentTask,
+        annotations: annotations
+    };
+    downloadFile(JSON.stringify(data, null, 2), 'annotations.json', 'application/json');
+}
+
+function exportCoNLL() {
+    // CoNLL format implementation
+    let conll = '';
+    // Add CoNLL formatting logic here
+    downloadFile(conll, 'annotations.conll', 'text/plain');
+}
+
+function exportLabelStudio() {
+    // Label Studio format implementation
+    const lsData = {
+        data: currentTask,
+        annotations: [{
+            result: annotations.map(ann => ({
+                from_name: "label",
+                to_name: "text", 
+                type: "labels",
+                value: {
+                    start: ann.start_offset,
+                    end: ann.end_offset,
+                    text: ann.text,
+                    labels: [ann.label_name]
+                }
+            }))
+        }]
+    };
+    downloadFile(JSON.stringify(lsData, null, 2), 'label_studio.json', 'application/json');
+}
+
+function downloadFile(content, filename, contentType) {
+    const a = document.createElement('a');
+    const file = new Blob([content], {type: contentType});
+    a.href = URL.createObjectURL(file);
+    a.download = filename;
+    a.click();
+}
+</script>
+{% endblock %}
