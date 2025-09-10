@@ -108,6 +108,41 @@
         padding: 1px 2px;
     }
     
+    .upload-area:hover {
+        border-color: #28a745 !important;
+        background-color: rgba(40, 167, 69, 0.05) !important;
+    }
+    
+    .upload-area.dragover {
+        border-color: #28a745 !important;
+        background-color: rgba(40, 167, 69, 0.1) !important;
+        transform: scale(1.02);
+    }
+    
+    .file-history-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 12px;
+        background: #f8f9fa;
+        border: 1px solid #e8e8e8;
+        border-radius: 3px;
+        margin-bottom: 4px;
+        font-size: 12px;
+    }
+    
+    .file-history-item.success {
+        border-left: 3px solid #28a745;
+    }
+    
+    .file-history-item.failed {
+        border-left: 3px solid #dc3545;
+    }
+    
+    .file-history-item.processing {
+        border-left: 3px solid #ffc107;
+    }
+    
     .export-section {
         background: white;
         padding: 20px;
@@ -177,6 +212,14 @@
                     <div id="label-buttons">
                         <!-- Label buttons will be loaded here -->
                     </div>
+                    
+                    <!-- Label selection status display -->
+                    <div id="label-selection-status" class="mt-3">
+                        <div class="alert alert-secondary py-2">
+                            <i class="fas fa-info-circle me-1"></i>라벨을 선택하세요
+                        </div>
+                    </div>
+                    
                     <div class="mt-3">
                         <button class="btn btn-sm btn-warning me-2" onclick="clearSelection()">
                             <i class="fas fa-eraser me-1"></i>선택 해제
@@ -214,6 +257,63 @@
                         <li>주석이 자동으로 적용됩니다</li>
                         <li>저장 버튼을 눌러 작업을 저장하세요</li>
                     </ol>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Upload Section - Old UI Style -->
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="upload-section" style="background: white; border-radius: 3px; box-shadow: 2px 2px 8px #AAA; border: 1px solid #e8e8e8;">
+                <div class="upload-header" style="padding: 12px 16px; border-bottom: 1px solid #e8e8e8; background: #f8f9fa; border-radius: 3px 3px 0 0;">
+                    <h6 class="mb-0" style="color: #2c3e50; font-size: 14px; font-weight: 600;">
+                        <i class="fas fa-upload me-2"></i>작업 파일 업로드
+                    </h6>
+                </div>
+                <div class="upload-body" style="padding: 20px;">
+                    <div class="upload-area" id="upload-area" 
+                         style="border: 2px dashed #dee2e6; border-radius: 4px; padding: 30px; text-align: center; cursor: pointer; transition: all 0.2s ease; background: #f8f9fa;"
+                         ondrop="dropHandler(event);" 
+                         ondragover="dragOverHandler(event);"
+                         ondragenter="dragEnterHandler(event);"
+                         ondragleave="dragLeaveHandler(event);">
+                        <div class="upload-icon" style="font-size: 48px; margin-bottom: 15px;">📁</div>
+                        <p class="upload-title" style="font-size: 16px; font-weight: 500; color: #2c3e50; margin-bottom: 8px;">
+                            파일을 여기에 드래그하거나 클릭하여 선택하세요
+                        </p>
+                        <p class="upload-subtitle" style="font-size: 13px; color: #6c757d; margin-bottom: 15px;">
+                            지원 형식: TXT, CSV, TSV, JSON, JSONL
+                        </p>
+                        <div class="upload-details" style="font-size: 12px; color: #6c757d; margin-bottom: 20px;">
+                            <small>• TXT: 한 줄당 하나의 작업</small><br>
+                            <small>• CSV/TSV: 각 행이 하나의 작업</small><br>
+                            <small>• JSON: 객체 배열 또는 단일 객체</small><br>
+                            <small>• JSONL: JSON Lines (한 줄당 하나의 JSON 객체)</small><br>
+                            <small style="color: #999;">최대 파일 크기: 16MB</small>
+                        </div>
+                        <button class="btn" style="background: #28a745; color: white; border: 1px solid #28a745; padding: 8px 16px; font-size: 12px; border-radius: 3px;" 
+                                onclick="document.getElementById('file-input').click();">
+                            <i class="fas fa-folder-open me-1"></i>파일 선택
+                        </button>
+                        <input type="file" id="file-input" accept=".txt,.csv,.tsv,.json,.jsonl" 
+                               onchange="handleFileSelect(event)" style="display: none;">
+                    </div>
+                    
+                    <div id="upload-progress" style="display: none; margin-top: 20px;">
+                        <div class="progress" style="height: 20px; background-color: #e9ecef; border-radius: 3px; overflow: hidden;">
+                            <div class="progress-bar" role="progressbar" style="width: 0%; background-color: #28a745; transition: width 0.3s ease;"></div>
+                        </div>
+                        <p class="text-center mt-2" style="margin: 0; color: #6c757d; font-size: 13px;">
+                            <span id="upload-status">업로드 중...</span>
+                        </p>
+                    </div>
+                    
+                    <!-- File History -->
+                    <div id="file-history" style="margin-top: 20px; display: none;">
+                        <h6 style="color: #2c3e50; font-size: 13px; margin-bottom: 10px;">최근 업로드된 파일</h6>
+                        <div id="file-history-list" style="max-height: 150px; overflow-y: auto;"></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -318,6 +418,8 @@ async function loadTasks() {
         
         if (tasks.length > 0) {
             loadTask(0);
+            // Load file metadata and auto-add extracted labels
+            await loadFileMetadata();
         } else {
             document.getElementById('text-display').innerHTML = '<p class="text-muted text-center">이 워크스페이스에 작업이 없습니다.</p>';
         }
@@ -360,9 +462,51 @@ async function loadTask(index) {
     
     // Load existing annotations for this task
     try {
+        console.log(`Loading annotations for task ${currentTask.id}`);
         const response = await fetch(`/api/tasks/${currentTask.id}/annotations/`);
         const data = await response.json();
         annotations = data.results || data;
+        console.log(`Loaded ${annotations.length} existing annotations:`, annotations);
+        
+        // Map annotations with label information
+        annotations = annotations.map(ann => {
+            // Find matching label
+            let labelInfo = null;
+            if (ann.labels && ann.labels.length > 0) {
+                const labelValue = ann.labels[0]; // Get first label
+                labelInfo = labels.find(label => label.value === labelValue);
+            }
+            
+            return {
+                ...ann,
+                label_name: labelInfo ? labelInfo.value : (ann.labels && ann.labels[0]) || 'Unknown',
+                label_color: labelInfo ? labelInfo.background : '#6c757d',
+                label_id: labelInfo ? labelInfo.id : null,
+                start_offset: ann.start,
+                end_offset: ann.end
+            };
+        });
+        console.log('Mapped annotations with label info:', annotations);
+        
+        // If no annotations exist but task has pre-existing annotations from file upload
+        if ((!annotations || annotations.length === 0) && currentTask.pre_annotations) {
+            try {
+                const preExistingAnnotations = currentTask.pre_annotations;
+                annotations = preExistingAnnotations.map((ann, index) => ({
+                    id: `pre_${index}`,
+                    start: ann.start,
+                    end: ann.end,
+                    label: ann.label,
+                    text: ann.text,
+                    task: currentTask.id
+                }));
+                console.log(`사전 정의된 ${annotations.length}개의 어노테이션을 로드했습니다.`);
+            } catch (parseError) {
+                console.error('Error parsing pre-existing annotations:', parseError);
+                annotations = [];
+            }
+        }
+        
         renderAnnotations();
     } catch (error) {
         console.error('Error loading annotations:', error);
@@ -404,6 +548,16 @@ function handleTextSelection() {
         
         console.log('Selected text:', selectedText);
         
+        // Update label selection status
+        updateLabelSelectionStatus();
+        
+        // Show feedback about text selection
+        if (selectedLabel) {
+            showToast(`텍스트 선택됨: "${selectedText_temp}". 라벨 "${selectedLabel.value}"로 어노테이션이 생성됩니다.`, 'success');
+        } else {
+            showToast(`텍스트 선택됨: "${selectedText_temp}". 라벨을 선택하세요.`, 'info');
+        }
+        
         // Highlight selected text visually
         document.querySelectorAll('.selected-text').forEach(el => 
             el.classList.remove('selected-text'));
@@ -431,12 +585,23 @@ function selectLabel(labelId) {
         btn.classList.remove('selected'));
     
     // Select new label
-    document.querySelector(`[data-label-id="${labelId}"]`).classList.add('selected');
-    selectedLabel = labels.find(l => l.id == labelId);
-    
-    // Apply annotation if text is selected
-    if (selectedText && selectedLabel) {
-        createAnnotation();
+    const selectedButton = document.querySelector(`[data-label-id="${labelId}"]`);
+    if (selectedButton) {
+        selectedButton.classList.add('selected');
+        selectedLabel = labels.find(l => l.id == labelId);
+        
+        // Show visual feedback
+        console.log(`라벨 선택됨: ${selectedLabel.value}`);
+        
+        // Update label selection status display
+        updateLabelSelectionStatus();
+        
+        // Apply annotation if text is selected
+        if (selectedText && selectedLabel) {
+            createAnnotation();
+        } else if (selectedLabel) {
+            showToast(`라벨 "${selectedLabel.value}" 선택됨. 이제 텍스트를 선택하세요.`, 'info');
+        }
     }
 }
 
@@ -451,6 +616,7 @@ function createAnnotation() {
         text: selectedText.text,
         start_offset: selectedText.start,
         end_offset: selectedText.end,
+        labels: [selectedLabel.value],
         label_name: selectedLabel.value,
         label_color: selectedLabel.background
     };
@@ -471,9 +637,9 @@ function renderAnnotations() {
     }
     
     container.innerHTML = annotations.map((ann, index) => 
-        `<div class="mb-2 p-2 border rounded" style="border-color: ${ann.label_color}">
-            <strong style="color: ${ann.label_color}">${ann.label_name}</strong><br>
-            <small class="text-muted">"${ann.text}"</small>
+        `<div class="mb-2 p-2 border rounded" style="border-color: black; background-color: ${ann.label_color}">
+            <strong style="color: ${getContrastColor(ann.label_color)}">${ann.labels[0]}</strong><br>
+            <small class="text5" style="color: ${getContrastColor(ann.label_color)}">"${ann.text}"</small>
             <button class="btn btn-sm btn-outline-danger float-end" onclick="removeAnnotationById('${ann.id}')">
                 <i class="fas fa-times"></i>
             </button>
@@ -503,6 +669,8 @@ function nextTask() {
 // Utility functions
 function clearSelection() {
     selectedText = null;
+    selectedLabel = null;
+    
     document.querySelectorAll('.selected-text').forEach(el => {
         const parent = el.parentNode;
         parent.insertBefore(document.createTextNode(el.textContent), el);
@@ -511,6 +679,11 @@ function clearSelection() {
     
     document.querySelectorAll('.label-button.selected').forEach(btn => 
         btn.classList.remove('selected'));
+    
+    // Update status display
+    updateLabelSelectionStatus();
+    
+    showToast('선택이 해제되었습니다.', 'info');
 }
 
 function removeAnnotation() {
@@ -526,6 +699,24 @@ function removeAnnotationById(annotationId) {
     annotations = annotations.filter(ann => ann.id !== annotationId);
     renderAnnotations();
     applyHighlighting();
+}
+
+// Update label selection status display
+function updateLabelSelectionStatus() {
+    const statusElement = document.getElementById('label-selection-status');
+    if (statusElement) {
+        if (selectedLabel) {
+            statusElement.innerHTML = `
+                <div class="alert alert-info py-2">
+                    <i class="fas fa-tag me-1"></i>
+                    선택된 라벨: <strong style="color: ${selectedLabel.background}">${selectedLabel.value}</strong>
+                    ${selectedText ? '- 텍스트도 선택됨' : '- 텍스트를 선택하세요'}
+                </div>
+            `;
+        } else {
+            statusElement.innerHTML = '<div class="alert alert-secondary py-2"><i class="fas fa-info-circle me-1"></i>라벨을 선택하세요</div>';
+        }
+    }
 }
 
 function getContrastColor(hexcolor) {
@@ -564,18 +755,72 @@ function getContrastColor(hexcolor) {
 
 // Save annotations
 async function saveAnnotations() {
+    if (!currentTask) {
+        alert('작업이 선택되지 않았습니다.');
+        return;
+    }
+
     try {
-        for (const annotation of annotations) {
-            await fetch('/api/annotations/', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(annotation)
-            });
+        // Clear existing annotations for this task first
+        const existingResponse = await fetch(`/api/tasks/${currentTask.id}/annotations/`);
+        if (existingResponse.ok) {
+            const existingAnnotations = await existingResponse.json();
+            const annotationsToDelete = existingAnnotations.results || existingAnnotations;
+            
+            // Delete existing annotations
+            for (const existingAnn of annotationsToDelete) {
+                await fetch(`/api/annotations/${existingAnn.id}/`, {
+                    method: 'DELETE',
+                    headers: {
+                        'X-CSRFToken': getCookie('csrftoken')
+                    }
+                });
+            }
         }
-        alert('주석이 저장되었습니다!');
+
+        // Create new annotations
+        let successCount = 0;
+        for (const annotation of annotations) {
+            const annotationData = {
+                task: currentTask.id,
+                start: annotation.start_offset,
+                end: annotation.end_offset,
+                text: annotation.text,
+                labels: [annotation.label_name], // Convert to array format expected by backend
+                label_id: annotation.label_id // Include label_id if available
+            };
+
+            console.log('Saving annotation:', annotationData); // Debug log
+
+            const response = await fetch('/api/annotations/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken')
+                },
+                body: JSON.stringify(annotationData)
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                console.log('Annotation saved successfully:', result);
+                successCount++;
+            } else {
+                const errorText = await response.text();
+                console.error('Error saving annotation:', {
+                    status: response.status,
+                    statusText: response.statusText,
+                    body: errorText,
+                    annotation: annotationData
+                });
+            }
+        }
+
+        showToast(`${successCount}개의 어노테이션이 성공적으로 저장되었습니다!`, `${successCount}개의 어노테이션이 저장되었습니다!`);
+        
     } catch (error) {
         console.error('Error saving annotations:', error);
-        alert('주석 저장 중 오류가 발생했습니다.');
+        showToast('어노테이션 저장 중 오류가 발생했습니다.', 'error');
     }
 }
 
@@ -623,5 +868,385 @@ function downloadFile(content, filename, contentType) {
     a.download = filename;
     a.click();
 }
+
+// File Upload Functions
+function dragOverHandler(ev) {
+    ev.preventDefault();
+}
+
+function dragEnterHandler(ev) {
+    ev.preventDefault();
+    document.getElementById('upload-area').classList.add('dragover');
+}
+
+function dragLeaveHandler(ev) {
+    ev.preventDefault();
+    document.getElementById('upload-area').classList.remove('dragover');
+}
+
+function dropHandler(ev) {
+    ev.preventDefault();
+    document.getElementById('upload-area').classList.remove('dragover');
+    
+    const files = ev.dataTransfer.files;
+    if (files.length > 0) {
+        uploadFile(files[0]);
+    }
+}
+
+function handleFileSelect(event) {
+    const files = event.target.files;
+    if (files.length > 0) {
+        uploadFile(files[0]);
+    }
+}
+
+async function uploadFile(file) {
+    if (!currentWorkspaceId) {
+        alert('워크스페이스가 선택되지 않았습니다.');
+        return;
+    }
+    
+    // Check file type
+    const allowedTypes = ['txt', 'csv', 'tsv', 'json', 'jsonl'];
+    const fileExtension = file.name.toLowerCase().split('.').pop();
+    
+    if (!allowedTypes.includes(fileExtension)) {
+        alert(`지원하지 않는 파일 형식입니다. 지원 형식: ${allowedTypes.join(', ').toUpperCase()}`);
+        return;
+    }
+    
+    // Check file size (16MB)
+    if (file.size > 16 * 1024 * 1024) {
+        alert('파일 크기가 너무 큽니다. 최대 16MB까지 업로드 가능합니다.');
+        return;
+    }
+    
+    // Show progress
+    const uploadProgress = document.getElementById('upload-progress');
+    const progressBar = uploadProgress.querySelector('.progress-bar');
+    const statusText = document.getElementById('upload-status');
+    
+    uploadProgress.style.display = 'block';
+    progressBar.style.width = '10%';
+    statusText.textContent = `파일 업로드 중... (${file.name})`;
+    
+    try {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('project_id', currentWorkspaceId);
+        formData.append('uploader_name', sessionStorage.getItem('memberName') || 'Anonymous');
+        
+        const response = await fetch('/api/v1/upload/', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCookie('csrftoken')
+            },
+            body: formData
+        });
+        
+        progressBar.style.width = '60%';
+        statusText.textContent = '파일 처리 중...';
+        
+        if (response.ok) {
+            const result = await response.json();
+            
+            progressBar.style.width = '100%';
+            progressBar.style.backgroundColor = '#28a745';
+            statusText.innerHTML = `
+                <strong>성공!</strong><br>
+                ${result.total_lines}줄에서 ${result.tasks_created}개의 작업을 생성했습니다.
+            `;
+            
+            // Add to file history
+            addFileToHistory(result.uploaded_file, 'success');
+            
+            // Hide progress after 4 seconds and reload tasks
+            setTimeout(() => {
+                uploadProgress.style.display = 'none';
+                progressBar.style.width = '0%';
+                progressBar.style.backgroundColor = '#28a745';
+                document.getElementById('file-input').value = '';
+                
+                // Reload tasks to show new ones
+                loadTasks();
+            }, 4000);
+            
+        } else {
+            const errorData = await response.json();
+            throw new Error(errorData.error || '업로드에 실패했습니다.');
+        }
+        
+    } catch (error) {
+        console.error('Upload error:', error);
+        
+        progressBar.style.width = '100%';
+        progressBar.style.backgroundColor = '#dc3545';
+        statusText.innerHTML = `<strong>오류:</strong> ${error.message}`;
+        
+        // Add to file history
+        addFileToHistory({
+            original_filename: file.name,
+            file_type: fileExtension,
+            error_message: error.message,
+            processing_status: 'failed'
+        }, 'failed');
+        
+        // Hide progress after 6 seconds
+        setTimeout(() => {
+            uploadProgress.style.display = 'none';
+            progressBar.style.width = '0%';
+            progressBar.style.backgroundColor = '#28a745';
+            document.getElementById('file-input').value = '';
+        }, 6000);
+    }
+}
+
+// File history management
+function addFileToHistory(fileData, status) {
+    const historySection = document.getElementById('file-history');
+    const historyList = document.getElementById('file-history-list');
+    
+    // Show history section
+    historySection.style.display = 'block';
+    
+    // Create history item
+    const historyItem = document.createElement('div');
+    historyItem.className = `file-history-item ${status}`;
+    
+    const statusIcon = status === 'success' ? '✅' : status === 'failed' ? '❌' : '⏳';
+    const statusText = status === 'success' ? 
+        `${fileData.tasks_created}개 작업 생성` : 
+        status === 'failed' ? 
+        `실패: ${fileData.error_message || '알 수 없는 오류'}` : 
+        '처리 중...';
+    
+    historyItem.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;">
+            <span style="font-size: 14px;">${statusIcon}</span>
+            <div style="flex: 1; min-width: 0;">
+                <div style="font-weight: 500; color: #2c3e50; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                    ${fileData.original_filename}
+                </div>
+                <div style="font-size: 11px; color: #6c757d;">
+                    ${statusText}
+                </div>
+            </div>
+        </div>
+        <div style="font-size: 11px; color: #6c757d; white-space: nowrap;">
+            ${fileData.file_type?.toUpperCase() || 'FILE'}
+        </div>
+    `;
+    
+    // Add to top of list
+    historyList.insertBefore(historyItem, historyList.firstChild);
+    
+    // Keep only last 5 items
+    while (historyList.children.length > 5) {
+        historyList.removeChild(historyList.lastChild);
+    }
+}
+
+// Load file history on page load
+async function loadFileHistory() {
+    if (!currentWorkspaceId) return;
+    
+    try {
+        const response = await fetch(`/api/v1/uploaded-files/?project=${currentWorkspaceId}`);
+        if (response.ok) {
+            const files = await response.json();
+            console.log('File history response:', files);
+            
+            // Ensure files is an array
+            const filesArray = Array.isArray(files) ? files : (files.results || []);
+            if (filesArray.length > 0) {
+                document.getElementById('file-history').style.display = 'block';
+                files.slice(0, 5).forEach(file => {
+                    const status = file.processing_status === 'completed' ? 'success' : 
+                                 file.processing_status === 'failed' ? 'failed' : 'processing';
+                    addFileToHistory(file, status);
+                });
+            }
+        }
+    } catch (error) {
+        console.error('Error loading file history:', error);
+    }
+}
+
+// Load file metadata and display it
+async function loadFileMetadata() {
+    if (!currentWorkspaceId) return;
+    
+    try {
+        const response = await fetch(`/api/v1/uploaded-files/?project=${currentWorkspaceId}`);
+        if (response.ok) {
+            const files = await response.json();
+            console.log('Raw files response:', files);
+            
+            // Ensure files is an array
+            const filesArray = Array.isArray(files) ? files : (files.results || []);
+            const filesWithMetadata = filesArray.filter(file => file.file_metadata || file.extracted_labels);
+            
+            if (filesWithMetadata.length > 0) {
+                displayMetadataPanel(filesWithMetadata);
+                
+                // Auto-add extracted labels to project
+                //await autoAddExtractedLabels(filesWithMetadata);
+            }
+        }
+    } catch (error) {
+        console.error('Error loading file metadata:', error);
+    }
+}
+
+// Display metadata panel
+function displayMetadataPanel(files) {
+    const metadataHtml = `
+        <div class="metadata-panel" style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid #007bff;">
+            <h6><i class="fas fa-info-circle"></i> 파일 메타데이터</h6>
+            ${files.map(file => {
+                const metadata = file.file_metadata || {};
+                const labels = file.extracted_labels || [];
+                
+                return `
+                    <div class="file-metadata" style="margin-bottom: 10px;">
+                        <strong>${file.original_filename}</strong>
+                        ${metadata.total_unique_entities ? `<span class="badge badge-info ml-2">${metadata.total_unique_entities}개 엔티티 타입</span>` : ''}
+                        ${labels.length > 0 ? `
+                            <div style="margin-top: 5px;">
+                                <small class="text-muted">추출된 라벨:</small>
+                                ${labels.map(label => `<span class="badge badge-secondary badge-sm ml-1">${label}</span>`).join('')}
+                            </div>
+                        ` : ''}
+                        ${metadata.data_ids && metadata.data_ids.length > 0 ? `
+                            <div style="margin-top: 5px;">
+                                <small class="text-muted">데이터 ID: ${metadata.data_ids.length}개</small>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }).join('')}
+        </div>
+    `;
+    
+    // Insert metadata panel before task navigation
+    const taskNav = document.querySelector('.task-navigation');
+    if (taskNav) {
+        taskNav.insertAdjacentHTML('beforebegin', metadataHtml);
+    }
+}
+
+// Auto-add extracted labels to project
+async function autoAddExtractedLabels(files) {
+    const allExtractedLabels = new Set();
+    
+    // Collect all unique labels from all files
+    files.forEach(file => {
+        if (file.extracted_labels) {
+            file.extracted_labels.forEach(label => allExtractedLabels.add(label));
+        }
+    });
+    
+    if (allExtractedLabels.size === 0) return;
+    
+    try {
+        // Get current project labels
+        const currentLabelsResponse = await fetch(`/api/v1/labels/?project=${currentWorkspaceId}`);
+        const currentLabelsData = currentLabelsResponse.ok ? await currentLabelsResponse.json() : [];
+        const currentLabels = Array.isArray(currentLabelsData) ? currentLabelsData : (currentLabelsData.results || []);
+        const existingLabelValues = new Set(currentLabels.map(label => label.value));
+        
+        // Create labels that don't exist yet
+        const labelsToCreate = Array.from(allExtractedLabels).filter(label => !existingLabelValues.has(label));
+        
+        if (labelsToCreate.length > 0) {
+            console.log(`자동으로 ${labelsToCreate.length}개의 새로운 라벨을 추가합니다:`, labelsToCreate);
+            
+            // Color palette for new labels
+            const colors = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#34495e', '#e67e22'];
+            
+            const labelPromises = labelsToCreate.map((labelValue, index) => {
+                const labelData = {
+                    value: labelValue,
+                    background: colors[index % colors.length],
+                    text: '#ffffff',
+                    project: currentWorkspaceId
+                };
+                
+                return fetch('/api/v1/labels/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCookie('csrftoken')
+                    },
+                    body: JSON.stringify(labelData)
+                });
+            });
+            
+            await Promise.all(labelPromises);
+            
+            // Reload labels to show the new ones
+            await loadLabels();
+            
+            // Show success message
+            showToast(`${labelsToCreate.length}개의 새로운 라벨이 자동으로 추가되었습니다!`, 'success');
+        }
+    } catch (error) {
+        console.error('Error auto-adding labels:', error);
+        showToast('라벨 자동 추가 중 오류가 발생했습니다.', 'error');
+    }
+}
+
+// Show toast message
+function showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.className = `alert alert-${type === 'success' ? 'success' : type === 'error' ? 'danger' : 'info'} alert-dismissible fade show`;
+    toast.style.cssText = 'position: fixed; top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+    toast.innerHTML = `
+        ${message}
+        <button type="button" class="close" data-dismiss="alert">
+            <span>&times;</span>
+        </button>
+    `;
+    
+    document.body.appendChild(toast);
+    
+    // Auto remove after 5 seconds
+    setTimeout(() => {
+        if (toast.parentNode) {
+            toast.parentNode.removeChild(toast);
+        }
+    }, 5000);
+}
+
+// Utility function to get CSRF cookie
+function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            // Does this cookie string begin with the name we want?
+            if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                break;
+            }
+        }
+    }
+    return cookieValue;
+}
+
+// Click handler for upload area
+document.addEventListener('DOMContentLoaded', function() {
+    const uploadArea = document.getElementById('upload-area');
+    if (uploadArea) {
+        uploadArea.addEventListener('click', () => {
+            document.getElementById('file-input').click();
+        });
+    }
+    
+    // Load file history when workspace is loaded
+    setTimeout(loadFileHistory, 1000);
+});
 </script>
 {% endblock %}

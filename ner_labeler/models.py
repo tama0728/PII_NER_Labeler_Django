@@ -110,6 +110,101 @@ class Project(models.Model):
     def __str__(self):
         return self.name
 
+class UploadedFile(models.Model):
+    """Model to track uploaded files and their processing status"""
+    
+    uuid = models.CharField(max_length=36, unique=True, default=generate_uuid)
+    
+    # File information
+    original_filename = models.CharField(max_length=255)
+    file_size = models.BigIntegerField()
+    file_type = models.CharField(max_length=10)  # txt, csv, tsv, json, jsonl
+    content_preview = models.TextField(blank=True)  # First few lines for preview
+    
+    # Metadata information
+    file_metadata = models.JSONField(blank=True, null=True)  # Store extracted metadata
+    extracted_labels = models.JSONField(blank=True, null=True)  # Store unique entity types found
+    
+    # Processing information
+    total_lines = models.IntegerField(default=0)
+    tasks_created = models.IntegerField(default=0)
+    processing_status = models.CharField(
+        max_length=20,
+        default="pending",
+        choices=[
+            ("pending", "Pending"),
+            ("processing", "Processing"),
+            ("completed", "Completed"),
+            ("failed", "Failed"),
+        ]
+    )
+    error_message = models.TextField(blank=True, null=True)
+    
+    # Relationships
+    project = models.ForeignKey(
+        Project, on_delete=models.CASCADE, related_name="uploaded_files"
+    )
+    uploader_name = models.CharField(max_length=100, blank=True)
+    
+    # Timestamps
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+    processed_at = models.DateTimeField(blank=True, null=True)
+    
+    class Meta:
+        db_table = "uploaded_files"
+        ordering = ["-created_at"]
+    
+    def mark_processing(self):
+        """Mark file as being processed"""
+        self.processing_status = "processing"
+        self.save()
+    
+    def mark_completed(self, tasks_created):
+        """Mark file processing as completed"""
+        self.processing_status = "completed"
+        self.tasks_created = tasks_created
+        self.processed_at = timezone.now()
+        self.save()
+    
+    def mark_failed(self, error_message):
+        """Mark file processing as failed"""
+        self.processing_status = "failed"
+        self.error_message = error_message
+        self.processed_at = timezone.now()
+        self.save()
+    
+    def get_unique_entity_types(self):
+        """Get unique entity types from extracted labels"""
+        if not self.extracted_labels:
+            return []
+        return list(set(self.extracted_labels))
+    
+    def to_dict(self):
+        """Convert to dictionary representation"""
+        return {
+            "id": self.id,
+            "uuid": self.uuid,
+            "original_filename": self.original_filename,
+            "file_size": self.file_size,
+            "file_type": self.file_type,
+            "content_preview": self.content_preview,
+            "total_lines": self.total_lines,
+            "tasks_created": self.tasks_created,
+            "processing_status": self.processing_status,
+            "error_message": self.error_message,
+            "project_id": self.project_id,
+            "uploader_name": self.uploader_name,
+            "file_metadata": self.file_metadata,
+            "extracted_labels": self.extracted_labels,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "processed_at": self.processed_at.isoformat() if self.processed_at else None,
+        }
+    
+    def __str__(self):
+        return f"{self.original_filename} ({self.file_type.upper()})"
+
 
 class Task(models.Model):
     """Task model representing individual annotation tasks"""
@@ -120,6 +215,9 @@ class Task(models.Model):
     text = models.TextField()
     original_filename = models.CharField(max_length=255, blank=True, null=True)
     line_number = models.IntegerField(blank=True, null=True)
+    
+    # Pre-existing annotations from uploaded file (JSON format)
+    pre_annotations = models.JSONField(blank=True, null=True)
 
     # Task status
     is_completed = models.BooleanField(default=False)
@@ -138,6 +236,10 @@ class Task(models.Model):
 
     # Foreign keys
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="tasks")
+    uploaded_file = models.ForeignKey(
+        'UploadedFile', on_delete=models.SET_NULL, 
+        blank=True, null=True, related_name="tasks"
+    )
     annotator_id = models.IntegerField(blank=True, null=True)  # Guest mode
 
     # Timestamps
@@ -289,6 +391,7 @@ class Task(models.Model):
             "identifier_type": self.identifier_type,
             "project_id": self.project_id,
             "annotator_id": self.annotator_id,
+            "pre_annotations": self.pre_annotations,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "annotation_count": self.annotation_count,

@@ -14,6 +14,8 @@ router.register(r"tasks", views.TaskViewSet, basename="task")
 router.register(r"annotations", views.AnnotationViewSet, basename="annotation")
 router.register(r"labels", views.LabelViewSet, basename="label")
 router.register(r"workspaces", views.ProjectViewSet, basename="workspace")  # Alias for projects
+router.register(r"upload", views.FileUploadViewSet, basename="upload")
+router.register(r"uploaded-files", views.UploadedFileViewSet, basename="uploaded-files")
 
 app_name = "ner_labeler"
 

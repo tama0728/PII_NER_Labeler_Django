@@ -3,7 +3,7 @@ Django REST Framework serializers for NER Labeler
 """
 
 from rest_framework import serializers
-from .models import Project, Task, Annotation, Label
+from .models import Project, Task, Annotation, Label, UploadedFile
 
 
 class ProjectSerializer(serializers.ModelSerializer):
@@ -50,6 +50,14 @@ class LabelSerializer(serializers.ModelSerializer):
                 "Hotkey must be a single alphanumeric character or symbol"
             )
         return value
+
+class UploadedFileSerializer(serializers.ModelSerializer):
+    """Serializer for UploadedFile model"""
+    
+    class Meta:
+        model = UploadedFile
+        fields = "__all__"
+        read_only_fields = ("created_at", "updated_at", "processed_at", "uuid")
 
 
 class AnnotationSerializer(serializers.ModelSerializer):
@@ -109,6 +117,7 @@ class AnnotationCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Annotation
         fields = [
+            "task",
             "start",
             "end",
             "text",
@@ -121,9 +130,11 @@ class AnnotationCreateSerializer(serializers.ModelSerializer):
         ]
 
     def create(self, validated_data):
-        """Create annotation with task from context"""
-        task = self.context["task"]
-        validated_data["task"] = task
+        """Create annotation with task from context or data"""
+        # If task is not in validated_data, try to get it from context
+        if "task" not in validated_data and "task" in self.context:
+            task = self.context["task"]
+            validated_data["task"] = task
         return super().create(validated_data)
 
 

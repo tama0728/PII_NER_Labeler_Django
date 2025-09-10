@@ -18,7 +18,7 @@ import json
 import os
 from datetime import datetime
 
-from .models import Project, Task, Annotation, Label
+from .models import Project, Task, Annotation, Label, UploadedFile
 from .serializers import (
     ProjectSerializer,
     TaskSerializer,
@@ -27,6 +27,7 @@ from .serializers import (
     AnnotationCreateSerializer,
     TaskCreateSerializer,
     LabelSerializer,
+    UploadedFileSerializer,
 )
 
 
@@ -188,6 +189,373 @@ class LabelViewSet(viewsets.ModelViewSet):
         project_id = self.kwargs.get("project_pk")
         project = get_object_or_404(Project, pk=project_id)
         serializer.save(project=project)
+
+@method_decorator(csrf_exempt, name='dispatch')
+class FileUploadViewSet(viewsets.ViewSet):
+    """ViewSet for file upload and task creation"""
+    
+    def create(self, request):
+        """Upload file and create tasks"""
+        if 'file' not in request.FILES:
+            return Response({'error': 'No file provided'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        uploaded_file = request.FILES['file']
+        project_id = request.data.get('project_id')
+        uploader_name = request.data.get('uploader_name', 'Anonymous')
+        
+        if not project_id:
+            return Response({'error': 'Project ID is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            project = Project.objects.get(pk=project_id)
+        except Project.DoesNotExist:
+            return Response({'error': 'Project not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Check file type
+        file_extension = uploaded_file.name.lower().split('.')[-1]
+        if file_extension not in ['txt', 'csv', 'tsv', 'json', 'jsonl']:
+            return Response(
+                {'error': f'Unsupported file type: {file_extension}. Supported: txt, csv, tsv, json, jsonl'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check file size (16MB limit)
+        if uploaded_file.size > 16 * 1024 * 1024:
+            return Response(
+                {'error': 'File too large. Maximum size is 16MB.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            # Read file content
+            file_content = uploaded_file.read()
+            if isinstance(file_content, bytes):
+                try:
+                    file_content = file_content.decode('utf-8')
+                except UnicodeDecodeError:
+                    try:
+                        file_content = file_content.decode('cp949')  # Korean encoding
+                    except UnicodeDecodeError:
+                        file_content = file_content.decode('utf-8', errors='ignore')
+            
+            # Create UploadedFile record
+            uploaded_file_record = UploadedFile.objects.create(
+                original_filename=uploaded_file.name,
+                file_size=uploaded_file.size,
+                file_type=file_extension,
+                content_preview=file_content[:500] + "..." if len(file_content) > 500 else file_content,
+                project=project,
+                uploader_name=uploader_name,
+                processing_status="processing"
+            )
+            
+            # Process file content and create tasks
+            try:
+                tasks_created, total_lines = self._process_file_content(
+                    file_content, 
+                    uploaded_file.name, 
+                    file_extension, 
+                    project,
+                    uploaded_file_record
+                )
+                
+                # Update uploaded file record
+                uploaded_file_record.total_lines = total_lines
+                uploaded_file_record.mark_completed(len(tasks_created))
+                
+                return Response({
+                    'message': f'Successfully created {len(tasks_created)} tasks from {total_lines} lines',
+                    'tasks_created': len(tasks_created),
+                    'total_lines': total_lines,
+                    'task_ids': [task.uuid for task in tasks_created],
+                    'uploaded_file': uploaded_file_record.to_dict()
+                }, status=status.HTTP_201_CREATED)
+                
+            except Exception as processing_error:
+                uploaded_file_record.mark_failed(str(processing_error))
+                raise processing_error
+            
+        except Exception as e:
+            return Response(
+                {'error': f'Error processing file: {str(e)}'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    def list(self, request):
+        """List uploaded files for a project"""
+        project_id = request.query_params.get('project')
+        if not project_id:
+            return Response({'error': 'Project ID is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        uploaded_files = UploadedFile.objects.filter(project_id=project_id)
+        return Response([file_record.to_dict() for file_record in uploaded_files])
+    
+    def _process_file_content(self, content, filename, file_extension, project, uploaded_file_record):
+        """Process file content and create tasks with enhanced logic including metadata extraction"""
+        tasks = []
+        total_lines = 0
+        extracted_metadata = {}
+        extracted_labels = []
+        
+        if file_extension == 'txt':
+            lines = content.strip().split('\n')
+            total_lines = len(lines)
+            
+            for line_num, line in enumerate(lines, 1):
+                line_text = line.strip()
+                if line_text:  # Skip empty lines
+                    task = Task.objects.create(
+                        text=line_text,
+                        original_filename=filename,
+                        line_number=line_num,
+                        project=project,
+                        uploaded_file=uploaded_file_record
+                    )
+                    tasks.append(task)
+        
+        elif file_extension in ['csv', 'tsv']:
+            import csv
+            import io
+            
+            delimiter = '\t' if file_extension == 'tsv' else ','
+            csv_reader = csv.reader(io.StringIO(content), delimiter=delimiter)
+            
+            lines = list(csv_reader)
+            total_lines = len(lines)
+            
+            # Extract headers as metadata
+            if lines and len(lines) > 0:
+                headers = lines[0]
+                extracted_metadata['headers'] = headers
+                extracted_metadata['column_count'] = len(headers)
+            
+            # Detect header row
+            has_header = False
+            if lines and len(lines) > 1:
+                first_row = lines[0]
+                if all(isinstance(cell, str) and not cell.replace('.', '').replace('-', '').isdigit() for cell in first_row if cell):
+                    has_header = True
+            
+            start_line = 1 if has_header else 0
+            
+            for line_num, row in enumerate(lines[start_line:], start_line + 1):
+                if row and any(cell.strip() for cell in row):  # Skip empty rows
+                    text = delimiter.join(str(cell).strip() for cell in row)
+                    if text.strip():
+                        task = Task.objects.create(
+                            text=text.strip(),
+                            original_filename=filename,
+                            line_number=line_num,
+                            project=project,
+                            uploaded_file=uploaded_file_record
+                        )
+                        tasks.append(task)
+        
+        elif file_extension == 'jsonl':
+            import json
+            
+            lines = content.strip().split('\n')
+            total_lines = len(lines)
+            metadata_summary = {'data_ids': set(), 'entity_types': set(), 'dialog_types': set()}
+            
+            for line_num, line in enumerate(lines, 1):
+                line_text = line.strip()
+                if line_text:
+                    try:
+                        data = json.loads(line_text)
+                        
+                        # Extract metadata if available
+                        if isinstance(data, dict) and 'metadata' in data:
+                            metadata = data['metadata']
+                            if 'data_id' in metadata:
+                                metadata_summary['data_ids'].add(metadata['data_id'])
+                            if 'provenance' in metadata and 'dialog_type' in metadata['provenance']:
+                                dialog_type = metadata['provenance']['dialog_type']
+                                if dialog_type:
+                                    metadata_summary['dialog_types'].add(dialog_type)
+                        
+                        # Extract entity types if available
+                        if isinstance(data, dict) and 'entities' in data:
+                            entities = data['entities']
+                            for entity in entities:
+                                if 'entity_type' in entity:
+                                    entity_type = entity['entity_type']
+                                    metadata_summary['entity_types'].add(entity_type)
+                                    extracted_labels.append(entity_type)
+                        
+                        # Extract text from JSON object
+                        if isinstance(data, dict):
+                            text = data.get('text', data.get('content', str(data)))
+                        else:
+                            text = str(data)
+                        
+                        # Create task with potential annotation data
+                        task_data = {
+                            'text': text,
+                            'original_filename': filename,
+                            'line_number': line_num,
+                            'project': project,
+                            'uploaded_file': uploaded_file_record
+                        }
+                        
+                        # If entities exist, pre-populate annotations
+                        if isinstance(data, dict) and 'entities' in data:
+                            annotations = []
+                            for entity in data['entities']:
+                                annotation = {
+                                    'start': entity.get('start_offset', 0),
+                                    'end': entity.get('end_offset', 0),
+                                    'label': entity.get('entity_type', ''),
+                                    'text': entity.get('span_text', '')
+                                }
+                                annotations.append(annotation)
+                            
+                            if annotations:
+                                task_data['pre_annotations'] = annotations
+                        
+                        task = Task.objects.create(**task_data)
+                        tasks.append(task)
+                        
+                    except json.JSONDecodeError:
+                        # Treat as plain text if not valid JSON
+                        task = Task.objects.create(
+                            text=line_text,
+                            original_filename=filename,
+                            line_number=line_num,
+                            project=project,
+                            uploaded_file=uploaded_file_record
+                        )
+                        tasks.append(task)
+            
+            # Convert sets to lists for JSON serialization
+            extracted_metadata = {
+                'data_ids': list(metadata_summary['data_ids']),
+                'entity_types': list(metadata_summary['entity_types']),
+                'dialog_types': list(metadata_summary['dialog_types']),
+                'total_unique_entities': len(metadata_summary['entity_types'])
+            }
+        
+        elif file_extension == 'json':
+            import json
+            
+            try:
+                data = json.loads(content)
+                
+                if isinstance(data, list):
+                    # Array of items
+                    total_lines = len(data)
+                    metadata_summary = {'data_ids': set(), 'entity_types': set(), 'dialog_types': set()}
+                    
+                    for idx, item in enumerate(data, 1):
+                        # Extract metadata and entities similar to JSONL
+                        if isinstance(item, dict) and 'metadata' in item:
+                            metadata = item['metadata']
+                            if 'data_id' in metadata:
+                                metadata_summary['data_ids'].add(metadata['data_id'])
+                            if 'provenance' in metadata and 'dialog_type' in metadata['provenance']:
+                                dialog_type = metadata['provenance']['dialog_type']
+                                if dialog_type:
+                                    metadata_summary['dialog_types'].add(dialog_type)
+                        
+                        if isinstance(item, dict) and 'entities' in item:
+                            entities = item['entities']
+                            for entity in entities:
+                                if 'entity_type' in entity:
+                                    entity_type = entity['entity_type']
+                                    metadata_summary['entity_types'].add(entity_type)
+                                    extracted_labels.append(entity_type)
+                        
+                        if isinstance(item, dict):
+                            text = item.get('text', item.get('content', str(item)))
+                        else:
+                            text = str(item)
+                        
+                        if text.strip():
+                            task_data = {
+                                'text': text.strip(),
+                                'original_filename': filename,
+                                'line_number': idx,
+                                'project': project,
+                                'uploaded_file': uploaded_file_record
+                            }
+                            
+                            # Pre-populate annotations if available
+                            if isinstance(item, dict) and 'entities' in item:
+                                annotations = []
+                                for entity in item['entities']:
+                                    annotation = {
+                                        'start': entity.get('start_offset', 0),
+                                        'end': entity.get('end_offset', 0),
+                                        'label': entity.get('entity_type', ''),
+                                        'text': entity.get('span_text', '')
+                                    }
+                                    annotations.append(annotation)
+                                
+                                if annotations:
+                                    task_data['pre_annotations'] = annotations
+                            
+                            task = Task.objects.create(**task_data)
+                            tasks.append(task)
+                    
+                    # Convert sets to lists for JSON serialization
+                    extracted_metadata = {
+                        'data_ids': list(metadata_summary['data_ids']),
+                        'entity_types': list(metadata_summary['entity_types']),
+                        'dialog_types': list(metadata_summary['dialog_types']),
+                        'total_unique_entities': len(metadata_summary['entity_types'])
+                    }
+                    
+                else:
+                    # Single object
+                    total_lines = 1
+                    if isinstance(data, dict):
+                        text = data.get('text', data.get('content', str(data)))
+                    else:
+                        text = str(data)
+                    
+                    if text.strip():
+                        task = Task.objects.create(
+                            text=text.strip(),
+                            original_filename=filename,
+                            line_number=1,
+                            project=project,
+                            uploaded_file=uploaded_file_record
+                        )
+                        tasks.append(task)
+                        
+            except json.JSONDecodeError:
+                # Treat as plain text if not valid JSON
+                total_lines = 1
+                task = Task.objects.create(
+                    text=content.strip(),
+                    original_filename=filename,
+                    line_number=1,
+                    project=project,
+                    uploaded_file=uploaded_file_record
+                )
+                tasks.append(task)
+        
+        # Save extracted metadata and labels to uploaded file record
+        if extracted_metadata:
+            uploaded_file_record.file_metadata = extracted_metadata
+        if extracted_labels:
+            uploaded_file_record.extracted_labels = list(set(extracted_labels))  # Remove duplicates
+        uploaded_file_record.save()
+        
+        return tasks, total_lines
+
+@method_decorator(csrf_exempt, name='dispatch')
+class UploadedFileViewSet(viewsets.ModelViewSet):
+    """ViewSet for UploadedFile CRUD operations"""
+    
+    serializer_class = UploadedFileSerializer
+    
+    def get_queryset(self):
+        """Filter uploaded files by project"""
+        project_id = self.request.query_params.get('project')
+        if project_id:
+            return UploadedFile.objects.filter(project_id=project_id)
+        return UploadedFile.objects.all()
 
 
 # Legacy API Views (for compatibility with existing frontend)
